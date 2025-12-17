@@ -19,6 +19,8 @@ class TestFieldPresets:
         """Test that greeks preset exists with expected fields."""
         assert "greeks" in FIELD_PRESETS
         preset = FIELD_PRESETS["greeks"]
+        assert "details_strike_price" in preset
+        assert "details_contract_type" in preset
         assert "greeks_delta" in preset
         assert "greeks_gamma" in preset
         assert "greeks_theta" in preset
@@ -29,8 +31,9 @@ class TestFieldPresets:
         """Test that options_summary preset exists with expected fields."""
         assert "options_summary" in FIELD_PRESETS
         preset = FIELD_PRESETS["options_summary"]
-        assert "strike_price" in preset
-        assert "expiration_date" in preset
+        assert "details_strike_price" in preset
+        assert "details_expiration_date" in preset
+        assert "details_contract_type" in preset
         assert "day_volume" in preset
         assert "open_interest" in preset
 
@@ -38,6 +41,7 @@ class TestFieldPresets:
         """Test that options_quote preset exists with expected fields."""
         assert "options_quote" in FIELD_PRESETS
         preset = FIELD_PRESETS["options_quote"]
+        assert "details_strike_price" in preset
         assert "last_quote_bid" in preset
         assert "last_quote_ask" in preset
 
