@@ -33,12 +33,37 @@ FIELD_PRESETS = {
     "trade": ["price", "size", "timestamp"],
     "quote": ["bid", "ask", "bid_size", "ask_size", "timestamp"],
     # Options presets (field names are flattened from nested API response)
-    "greeks": ["details_ticker", "details_strike_price", "details_expiration_date", "details_contract_type",
-               "greeks_delta", "greeks_gamma", "greeks_theta", "greeks_vega", "implied_volatility"],
-    "options_summary": ["details_ticker", "details_strike_price", "details_expiration_date", "details_contract_type",
-                        "day_close", "day_open", "day_volume", "open_interest", "implied_volatility"],
-    "options_quote": ["details_ticker", "details_strike_price", "details_contract_type",
-                      "last_quote_bid", "last_quote_ask", "last_quote_bid_size", "last_quote_ask_size"],
+    "greeks": [
+        "details_ticker",
+        "details_strike_price",
+        "details_expiration_date",
+        "details_contract_type",
+        "greeks_delta",
+        "greeks_gamma",
+        "greeks_theta",
+        "greeks_vega",
+        "implied_volatility",
+    ],
+    "options_summary": [
+        "details_ticker",
+        "details_strike_price",
+        "details_expiration_date",
+        "details_contract_type",
+        "day_close",
+        "day_open",
+        "day_volume",
+        "open_interest",
+        "implied_volatility",
+    ],
+    "options_quote": [
+        "details_ticker",
+        "details_strike_price",
+        "details_contract_type",
+        "last_quote_bid",
+        "last_quote_ask",
+        "last_quote_bid_size",
+        "last_quote_ask_size",
+    ],
 }
 
 

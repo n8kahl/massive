@@ -1,8 +1,6 @@
-import json
 import csv
 import io
 
-import pytest
 
 from mcp_massive.formatters import json_to_csv, _flatten_dict
 
