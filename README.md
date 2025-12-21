@@ -52,7 +52,7 @@ path to `uvx`.
 
 ```bash
 # Claude CLI
-claude mcp add massive -e MASSIVE_API_KEY=your_api_key_here -- uvx --from git+https://github.com/massive-com/mcp_massive@v0.6.0 mcp_massive
+claude mcp add massive -e MASSIVE_API_KEY=your_api_key_here -- uvx --from git+https://github.com/massive-com/mcp_massive@v0.7.0 mcp_massive
 ```
 
 This command will install the MCP server in your current project.
@@ -83,7 +83,7 @@ Make sure you complete the various fields.
             "command": "<path_to_your_uvx_install>/uvx",
             "args": [
                 "--from",
-                "git+https://github.com/massive-com/mcp_massive@v0.6.0",
+                "git+https://github.com/massive-com/mcp_massive@v0.7.0",
                 "mcp_massive"
             ],
             "env": {
@@ -130,11 +130,35 @@ This MCP server implements all Massive.com API endpoints as tools, including:
 - `get_last_trade` - Latest trade for a symbol
 - `list_ticker_news` - Recent news articles for tickers
 - `get_snapshot_ticker` - Current market snapshot for a ticker
+- `list_snapshot_options_chain` - Option chain snapshot with greeks and market data
 - `get_market_status` - Current market status and trading hours
 - `list_stock_financials` - Fundamental financial data
 - And many more...
 
 Each tool follows the Massive.com SDK parameter structure while converting responses to standard JSON that LLMs can easily process.
+
+### Output Filtering
+
+Some tools support output filtering to reduce response size and token usage. These tools accept additional parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `fields` | Comma-separated field names or a preset (e.g., `"ticker,close"` or `"preset:greeks"`) |
+| `output_format` | Output format: `"csv"` (default), `"json"`, or `"compact"` |
+| `aggregate` | Return only `"first"` or `"last"` record |
+
+**Available field presets:**
+
+| Preset | Fields |
+|--------|--------|
+| `price` | ticker, close, timestamp |
+| `ohlcv` | ticker, open, high, low, close, volume, timestamp |
+| `summary` | ticker, close, volume, change_percent |
+| `greeks` | details_ticker, details_strike_price, details_expiration_date, details_contract_type, greeks_delta, greeks_gamma, greeks_theta, greeks_vega, implied_volatility |
+| `options_summary` | details_ticker, details_strike_price, details_expiration_date, details_contract_type, day_close, day_open, day_volume, open_interest, implied_volatility |
+| `options_quote` | details_ticker, details_strike_price, details_contract_type, last_quote_bid, last_quote_ask, last_quote_bid_size, last_quote_ask_size |
+
+Example: `fields="preset:greeks"` returns only the greek values for options contracts.
 
 ## Development
 

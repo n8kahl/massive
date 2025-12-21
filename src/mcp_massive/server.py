@@ -15,7 +15,9 @@ load_dotenv()
 MASSIVE_API_KEY = os.environ.get("MASSIVE_API_KEY", "")
 if not MASSIVE_API_KEY:
     print("Warning: MASSIVE_API_KEY environment variable not set.")
-    print("Please set it in your environment or create a .env file with MASSIVE_API_KEY=your_key")
+    print(
+        "Please set it in your environment or create a .env file with MASSIVE_API_KEY=your_key"
+    )
 
 version_number = "MCP-Massive/unknown"
 try:
@@ -27,6 +29,37 @@ massive_client = RESTClient(MASSIVE_API_KEY)
 massive_client.headers["User-Agent"] += f" {version_number}"
 
 poly_mcp = FastMCP("Massive")
+
+
+def _apply_output_filtering(
+    raw_data: bytes,
+    fields: Optional[str] = None,
+    output_format: str = "csv",
+    aggregate: Optional[str] = None,
+) -> str:
+    """
+    Helper function to apply output filtering to API responses.
+
+    Args:
+        raw_data: Raw bytes from API response
+        fields: Field selection (comma-separated or preset like "preset:greeks")
+        output_format: Output format (csv, json, compact)
+        aggregate: Aggregation method (first, last)
+
+    Returns:
+        Filtered and formatted string response
+    """
+    if fields or output_format != "csv" or aggregate:
+        from .filters import parse_filter_params, apply_filters
+
+        filter_options = parse_filter_params(
+            fields=fields,
+            output_format=output_format,
+            aggregate=aggregate,
+        )
+        return apply_filters(raw_data.decode("utf-8"), filter_options)
+    else:
+        return json_to_csv(raw_data.decode("utf-8"))
 
 
 @poly_mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -462,6 +495,109 @@ async def get_snapshot_crypto_book(
         )
 
         return json_to_csv(results.data.decode("utf-8"))
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@poly_mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_snapshot_options_chain(
+    underlying_asset: str,
+    strike_price: Optional[float] = None,
+    strike_price_lt: Optional[float] = None,
+    strike_price_lte: Optional[float] = None,
+    strike_price_gt: Optional[float] = None,
+    strike_price_gte: Optional[float] = None,
+    expiration_date: Optional[str] = None,
+    expiration_date_lt: Optional[str] = None,
+    expiration_date_lte: Optional[str] = None,
+    expiration_date_gt: Optional[str] = None,
+    expiration_date_gte: Optional[str] = None,
+    contract_type: Optional[str] = None,
+    limit: Optional[int] = 250,
+    sort: Optional[str] = None,
+    order: Optional[str] = None,
+    fields: Optional[str] = None,
+    output_format: str = "csv",
+    aggregate: Optional[str] = None,
+    params: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Get option chain snapshot for an underlying asset with greeks and market data.
+
+    Returns all option contracts for the specified underlying asset, including
+    current prices, volume, open interest, and greeks (delta, gamma, theta, vega).
+
+    Args:
+        underlying_asset: The underlying ticker symbol (e.g., "AAPL")
+        strike_price: Filter by exact strike price
+        strike_price_lt/lte/gt/gte: Filter by strike price range
+        expiration_date: Filter by exact expiration date (YYYY-MM-DD)
+        expiration_date_lt/lte/gt/gte: Filter by expiration date range
+        contract_type: Filter by contract type ("call" or "put")
+        limit: Maximum number of results (default 250)
+        sort: Sort field
+        order: Sort order ("asc" or "desc")
+        fields: Field selection - comma-separated field names or preset
+                (e.g., "preset:greeks", "preset:options_summary", or "ticker,strike_price,greeks_delta")
+        output_format: Output format - "csv" (default), "json", or "compact"
+        aggregate: Aggregation method - "first" or "last" (for single record)
+        params: Additional API parameters
+
+    Available presets for fields:
+        - "preset:greeks" - Greek values (delta, gamma, theta, vega) with IV
+        - "preset:options_summary" - Price, volume, open interest summary
+        - "preset:options_quote" - Bid/ask quote data
+    """
+    try:
+        # Build params dict with all filter parameters
+        api_params = params.copy() if params else {}
+
+        # Add strike price filters
+        if strike_price is not None:
+            api_params["strike_price"] = strike_price
+        if strike_price_lt is not None:
+            api_params["strike_price.lt"] = strike_price_lt
+        if strike_price_lte is not None:
+            api_params["strike_price.lte"] = strike_price_lte
+        if strike_price_gt is not None:
+            api_params["strike_price.gt"] = strike_price_gt
+        if strike_price_gte is not None:
+            api_params["strike_price.gte"] = strike_price_gte
+
+        # Add expiration date filters
+        if expiration_date is not None:
+            api_params["expiration_date"] = expiration_date
+        if expiration_date_lt is not None:
+            api_params["expiration_date.lt"] = expiration_date_lt
+        if expiration_date_lte is not None:
+            api_params["expiration_date.lte"] = expiration_date_lte
+        if expiration_date_gt is not None:
+            api_params["expiration_date.gt"] = expiration_date_gt
+        if expiration_date_gte is not None:
+            api_params["expiration_date.gte"] = expiration_date_gte
+
+        # Add other filters
+        if contract_type is not None:
+            api_params["contract_type"] = contract_type
+        if limit is not None:
+            api_params["limit"] = limit
+        if sort is not None:
+            api_params["sort"] = sort
+        if order is not None:
+            api_params["order"] = order
+
+        results = massive_client.list_snapshot_options_chain(
+            underlying_asset=underlying_asset,
+            params=api_params if api_params else None,
+            raw=True,
+        )
+
+        return _apply_output_filtering(
+            results.data,
+            fields=fields,
+            output_format=output_format,
+            aggregate=aggregate,
+        )
     except Exception as e:
         return f"Error: {e}"
 
@@ -1430,25 +1566,25 @@ async def list_benzinga_news(
     sort: Optional[str] = None,
 ) -> str:
     """
-    Retrieve real-time structured, timestamped news articles from Benzinga v2 API, including headlines, 
-    full-text content, tickers, categories, and more. Each article entry contains metadata such as author, 
-    publication time, and topic channels, as well as optional elements like teaser summaries, article body text, 
-    and images. Articles can be filtered by ticker and time, and are returned in a consistent format for easy 
-    parsing and integration. This endpoint is ideal for building alerting systems, autonomous risk analysis, 
+    Retrieve real-time structured, timestamped news articles from Benzinga v2 API, including headlines,
+    full-text content, tickers, categories, and more. Each article entry contains metadata such as author,
+    publication time, and topic channels, as well as optional elements like teaser summaries, article body text,
+    and images. Articles can be filtered by ticker and time, and are returned in a consistent format for easy
+    parsing and integration. This endpoint is ideal for building alerting systems, autonomous risk analysis,
     and sentiment-driven trading strategies.
-    
+
     Args:
-        published: The timestamp (formatted as an ISO 8601 timestamp) when the news article was originally 
+        published: The timestamp (formatted as an ISO 8601 timestamp) when the news article was originally
                   published. Value must be an integer timestamp in seconds or formatted 'yyyy-mm-dd'.
         channels: Filter for arrays that contain the value (e.g., 'News', 'Price Target').
         tags: Filter for arrays that contain the value.
         author: The name of the journalist or entity that authored the news article.
         stocks: Filter for arrays that contain the value.
         tickers: Filter for arrays that contain the value.
-        limit: Limit the maximum number of results returned. Defaults to 100 if not specified. 
+        limit: Limit the maximum number of results returned. Defaults to 100 if not specified.
                The maximum allowed limit is 50000.
-        sort: A comma separated list of sort columns. For each column, append '.asc' or '.desc' to specify 
-              the sort direction. The sort column defaults to 'published' if not specified. 
+        sort: A comma separated list of sort columns. For each column, append '.asc' or '.desc' to specify
+              the sort direction. The sort column defaults to 'published' if not specified.
               The sort order defaults to 'desc' if not specified.
     """
     try:
