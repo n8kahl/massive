@@ -154,9 +154,9 @@ Some tools support output filtering to reduce response size and token usage. The
 | `price` | ticker, close, timestamp |
 | `ohlcv` | ticker, open, high, low, close, volume, timestamp |
 | `summary` | ticker, close, volume, change_percent |
-| `greeks` | ticker, strike_price, expiration_date, contract_type, delta, gamma, theta, vega, implied_volatility |
-| `options_summary` | ticker, strike_price, expiration_date, contract_type, close, open, volume, open_interest, implied_volatility |
-| `options_quote` | ticker, strike_price, contract_type, bid, ask, bid_size, ask_size |
+| `greeks` | details_ticker, details_strike_price, details_expiration_date, details_contract_type, greeks_delta, greeks_gamma, greeks_theta, greeks_vega, implied_volatility |
+| `options_summary` | details_ticker, details_strike_price, details_expiration_date, details_contract_type, day_close, day_open, day_volume, open_interest, implied_volatility |
+| `options_quote` | details_ticker, details_strike_price, details_contract_type, last_quote_bid, last_quote_ask, last_quote_bid_size, last_quote_ask_size |
 
 Example: `fields="preset:greeks"` returns only the greek values for options contracts.
 
