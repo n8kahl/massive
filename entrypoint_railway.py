@@ -1,24 +1,28 @@
 import os
+import uvicorn
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
-# Import your existing server entry.
-# One of these imports will match depending on how the repo is structured.
-try:
-    # common pattern
-    from mcp_massive.__main__ import main
-except Exception:
-    try:
-        from mcp_massive import main
-    except Exception:
-        # fallback: if upstream uses an entrypoint.py already
-        from entrypoint import main  # type: ignore
-
+# Import the FastMCP instance that already has all your tools registered
+from mcp_massive.server import poly_mcp  # this exists in your server.py
 
 if __name__ == "__main__":
-    # Force network transport for hosted use
-    os.environ.setdefault("MCP_TRANSPORT", "streamable-http")
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
 
-    # Railway requires binding to the injected port
-    os.environ.setdefault("HOST", "0.0.0.0")
-    os.environ.setdefault("PORT", os.environ.get("PORT", "8000"))
+    # What transport to expose publicly
+    # chat-data.com may try SSE; streamable-http is newer.
+    transport = os.environ.get("MCP_TRANSPORT", "streamable-http").strip().lower()
 
-    main()
+    # Build an ASGI app that exposes the MCP server at the standard paths.
+    # Per MCP Python SDK defaults:
+    # - Streamable HTTP: /mcp
+    # - SSE:            /sse
+    #  [oai_citation:1‡GitHub](https://github.com/modelcontextprotocol/python-sdk?utm_source=chatgpt.com)
+    if transport in ("sse",):
+        app = Starlette(routes=[Mount("/", app=poly_mcp.sse_app())])
+    else:
+        # streamable-http (default)
+        app = Starlette(routes=[Mount("/", app=poly_mcp.streamable_http_app())])
+
+    uvicorn.run(app, host=host, port=port, log_level="info")
