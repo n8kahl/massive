@@ -1,8 +1,13 @@
+# entrypoint_railway.py
 import os
 import json
 import uvicorn
 
-from mcp_massive.server import poly_mcp, massive_query  # <-- import massive_query too
+from mcp_massive.server import (
+    poly_mcp,               # FastMCP instance
+    massive_query,          # Router tool function (works as normal Python fn too)
+    massive_list_operations # Helper to list Massive client method names
+)
 
 
 def json_response(status_code: int, payload: dict):
@@ -29,7 +34,6 @@ async def read_body(receive) -> bytes:
 def make_wrapped_app(mcp_asgi_app):
     async def app(scope, receive, send):
         if scope["type"] != "http":
-            # Hand off non-HTTP to MCP app
             await mcp_asgi_app(scope, receive, send)
             return
 
@@ -44,6 +48,7 @@ def make_wrapped_app(mcp_asgi_app):
             return
 
         # ---- myGPT Actions endpoint (REST JSON) ----
+        # POST /api/market_query
         if path == "/api/market_query":
             if method != "POST":
                 status, headers, body = json_response(
@@ -57,9 +62,7 @@ def make_wrapped_app(mcp_asgi_app):
             try:
                 payload = json.loads(raw.decode("utf-8") if raw else "{}")
             except Exception:
-                status, headers, body = json_response(
-                    400, {"ok": False, "error": "Invalid JSON body"}
-                )
+                status, headers, body = json_response(400, {"ok": False, "error": "Invalid JSON body"})
                 await send({"type": "http.response.start", "status": status, "headers": headers})
                 await send({"type": "http.response.body", "body": body})
                 return
@@ -70,39 +73,46 @@ def make_wrapped_app(mcp_asgi_app):
 
             if not provider or not operation:
                 status, headers, body = json_response(
-                    400,
-                    {
-                        "ok": False,
-                        "error": "Missing required fields: provider, operation",
-                    },
+                    400, {"ok": False, "error": "Missing required fields: provider, operation"}
                 )
                 await send({"type": "http.response.start", "status": status, "headers": headers})
                 await send({"type": "http.response.body", "body": body})
                 return
 
+            # ---- Special helper for myGPT: list Massive operations ----
+            # Call with:
+            # { "provider":"massive", "operation":"list_operations", "params": {"contains":"options"} }
+            if provider.lower() == "massive" and operation.lower() in ("list_operations", "__list__", "list_ops"):
+                try:
+                    contains = (params or {}).get("contains")
+                    ops = massive_list_operations(contains=contains)
+                    status, headers, body = json_response(
+                        200,
+                        {"ok": True, "provider": "massive", "operation": "list_operations", "data": str(ops)},
+                    )
+                except Exception as e:
+                    status, headers, body = json_response(
+                        500, {"ok": False, "error": f"Server error: {e}"}
+                    )
+
+                await send({"type": "http.response.start", "status": status, "headers": headers})
+                await send({"type": "http.response.body", "body": body})
+                return
+
+            # ---- Normal router call ----
             try:
                 data = massive_query(provider=provider, operation=operation, params=params)
 
-                # Treat router “Error: …” strings as 400 for clarity
+                # If router returns "Error: ...", treat as 400 for clarity in Actions
                 if isinstance(data, str) and data.lower().startswith("error"):
                     status, headers, body = json_response(
                         400,
-                        {
-                            "ok": False,
-                            "provider": provider,
-                            "operation": operation,
-                            "error": data,
-                        },
+                        {"ok": False, "provider": provider, "operation": operation, "error": data},
                     )
                 else:
                     status, headers, body = json_response(
                         200,
-                        {
-                            "ok": True,
-                            "provider": provider,
-                            "operation": operation,
-                            "data": str(data),
-                        },
+                        {"ok": True, "provider": provider, "operation": operation, "data": str(data)},
                     )
 
                 await send({"type": "http.response.start", "status": status, "headers": headers})
@@ -110,9 +120,7 @@ def make_wrapped_app(mcp_asgi_app):
                 return
 
             except Exception as e:
-                status, headers, body = json_response(
-                    500, {"ok": False, "error": f"Server error: {e}"}
-                )
+                status, headers, body = json_response(500, {"ok": False, "error": f"Server error: {e}"})
                 await send({"type": "http.response.start", "status": status, "headers": headers})
                 await send({"type": "http.response.body", "body": body})
                 return
@@ -132,6 +140,7 @@ if __name__ == "__main__":
     if transport == "sse":
         mcp_app = poly_mcp.sse_app()
     else:
+        # default: streamable-http
         mcp_app = poly_mcp.streamable_http_app()
 
     app = make_wrapped_app(mcp_app)
