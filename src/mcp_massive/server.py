@@ -12,15 +12,6 @@ from datetime import datetime, date
 # Load environment variables from .env file if it exists
 load_dotenv()
 
-
-# Hosted deployment configuration (Railway/Fly/Render/etc.)
-# NOTE: The official MCP Python SDK's FastMCP (mcp.server.fastmcp.FastMCP) takes host/port in the constructor,
-# and run() supports transport + mount_path (not host/port kwargs).
-HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", "8000"))
-MCP_PATH = os.environ.get("MCP_PATH", "/mcp/")
-
-
 MASSIVE_API_KEY = os.environ.get("MASSIVE_API_KEY", "")
 if not MASSIVE_API_KEY:
     print("Warning: MASSIVE_API_KEY environment variable not set.")
@@ -35,33 +26,82 @@ except PackageNotFoundError:
 massive_client = RESTClient(MASSIVE_API_KEY)
 massive_client.headers["User-Agent"] += f" {version_number}"
 
+poly_mcp = FastMCP("Massive")
+
+
+
+
 @poly_mcp.tool(
     name="massive_query",
-    description="Router tool: call any Massive endpoint by name with params. Use this when tool limits restrict exposing many endpoints.",
+    description=(
+        "Router tool: call any Massive RESTClient operation by name with params. "
+        "Use this to access Options Advanced / Indices Advanced without exposing many tools."
+    ),
+    annotations=ToolAnnotations(
+        title="Massive Query Router",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
 )
-def massive_query(operation: str, params: Dict[str, Any]) -> str:
+def massive_query(operation: str, params: Optional[Dict[str, Any]] = None) -> str:
+    """Call a Massive RESTClient method by name.
+
+    Args:
+        operation: Name of the RESTClient method to call (example: 'get_aggs', 'get_snapshot_ticker', etc.).
+        params: Dict of keyword args for that method. If you provide 'from', it will be mapped to 'from_'.
+    """
+    params = params or {}
     try:
         fn = getattr(massive_client, operation, None)
         if fn is None:
-            return f"Error: Unknown operation '{operation}'"
+            return (
+                f"Error: Unknown operation '{operation}'. "
+                "Tip: call 'massive_list_operations' to see available operation names."
+            )
 
-        # Handle Python reserved word for `from_` if user sends 'from'
-        if "from" in params and "from_" not in params:
-            params["from_"] = params.pop("from")
+        # Normalize reserved keywords
+        if isinstance(params, dict):
+            if "from" in params and "from_" not in params:
+                params["from_"] = params.pop("from")
 
         result = fn(**params)
 
-        # Most Massive client calls return response-like objects with .data
+        # Most Massive client calls return an object with .data (bytes)
         if hasattr(result, "data"):
-            data = result.data.decode("utf-8") if isinstance(result.data, (bytes, bytearray)) else str(result.data)
-            return json_to_csv(data) if isinstance(data, str) else str(data)
+            raw = result.data
+            if isinstance(raw, (bytes, bytearray)):
+                return json_to_csv(raw.decode("utf-8"))
+            return json_to_csv(str(raw))
 
         return str(result)
+    except Exception as e:
+        return f"Error calling operation '{operation}': {e}"
 
+
+@poly_mcp.tool(
+    name="massive_list_operations",
+    description="List Massive RESTClient operation names (filterable). Use this to find Options/Indices methods to call via massive_query.",
+    annotations=ToolAnnotations(
+        title="List Massive Operations",
+        readOnlyHint=True,
+        openWorldHint=True,
+    ),
+)
+def massive_list_operations(contains: Optional[str] = None) -> str:
+    """Return available Massive RESTClient method names.
+
+    Args:
+        contains: Optional substring filter (e.g., 'options', 'indices', 'snapshot').
+    """
+    try:
+        names = [n for n in dir(massive_client) if not n.startswith("_") and callable(getattr(massive_client, n, None))]
+        if contains:
+            c = contains.lower()
+            names = [n for n in names if c in n.lower()]
+        return "\n".join(sorted(names))
     except Exception as e:
         return f"Error: {e}"
 
-poly_mcp = FastMCP("Massive", host=HOST, port=PORT)
 @poly_mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_aggs(
     ticker: str,
@@ -2014,23 +2054,6 @@ async def get_futures_snapshot(
 # It will be run from entrypoint.py
 
 
-
 def run(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
-    """Run the Massive MCP server.
-
-    IMPORTANT: This repo uses the official MCP Python SDK's FastMCP:
-      from mcp.server.fastmcp import FastMCP
-
-    In this SDK:
-      - host/port are configured on the FastMCP constructor (already done above)
-      - run() accepts (transport=..., mount_path=...) and does NOT accept host/port kwargs
-    """
-
-    # STDIO ignores mount_path and is intended for local usage
-    if transport == "stdio":
-        poly_mcp.run("stdio")
-        return
-
-    # Network transports (SSE or Streamable HTTP)
-    poly_mcp.run(transport=transport, mount_path=MCP_PATH)
-
+    """Run the Massive MCP server."""
+    poly_mcp.run(transport)
