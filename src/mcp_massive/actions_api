@@ -1,0 +1,68 @@
+# src/mcp_massive/actions_api.py
+
+from __future__ import annotations
+
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.requests import Request
+
+# Import your existing router (the MCP tool function).
+# It works as a normal Python function too.
+from mcp_massive.server import massive_query
+
+
+async def healthz(_: Request) -> JSONResponse:
+    return JSONResponse({"ok": True})
+
+
+async def market_query(request: Request) -> JSONResponse:
+    """
+    POST /api/market_query
+    Body:
+      {
+        "provider": "tradier" | "massive",
+        "operation": "quotes" | "history" | ...,
+        "params": { ... }
+      }
+
+    Returns:
+      { ok, provider, operation, data }
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    provider = (payload.get("provider") or "").strip()
+    operation = (payload.get("operation") or "").strip()
+    params = payload.get("params") or {}
+
+    if not provider or not operation:
+        return JSONResponse(
+            {"ok": False, "error": "Missing required fields: provider, operation"},
+            status_code=400,
+        )
+
+    # Call your existing router
+    data = massive_query(provider=provider, operation=operation, params=params)
+
+    # If your router returns an Error string, map to 400 for Actions clarity
+    if isinstance(data, str) and data.lower().startswith("error"):
+        return JSONResponse(
+            {"ok": False, "provider": provider, "operation": operation, "error": data},
+            status_code=400,
+        )
+
+    return JSONResponse(
+        {"ok": True, "provider": provider, "operation": operation, "data": str(data)},
+        status_code=200,
+    )
+
+
+app = Starlette(
+    routes=[
+        Route("/healthz", healthz, methods=["GET"]),
+        Route("/api/market_query", market_query, methods=["POST"]),
+    ]
+)
