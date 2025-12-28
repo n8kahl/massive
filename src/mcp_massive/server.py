@@ -1,4 +1,5 @@
 import os
+import httpx
 from typing import Optional, Any, Dict, Union, List, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -34,29 +35,56 @@ poly_mcp = FastMCP("Massive")
 @poly_mcp.tool(
     name="massive_query",
     description=(
-        "Router tool: call any Massive RESTClient operation by name with params. "
-        "Use this to access Options Advanced / Indices Advanced without exposing many tools."
+        "Unified market router: set provider='massive' for Massive (Options/Indices Advanced) "
+        "or provider='tradier' for underlying stocks/ETFs quotes & candles. "
+        "Use this to stay within action/tool limits."
     ),
     annotations=ToolAnnotations(
-        title="Massive Query Router",
+        title="Market Query Router",
         readOnlyHint=True,
         openWorldHint=True,
     ),
 )
-def massive_query(operation: str, params: Optional[Dict[str, Any]] = None) -> str:
-    """Call a Massive RESTClient method by name.
+def massive_query(provider: str, operation: str, params: Optional[Dict[str, Any]] = None) -> str:
+    """Route a request to Massive or Tradier.
 
-    Args:
-        operation: Name of the RESTClient method to call (example: 'get_aggs', 'get_snapshot_ticker', etc.).
-        params: Dict of keyword args for that method. If you provide 'from', it will be mapped to 'from_'.
+    provider:
+      - 'massive'  -> calls massive_client.<operation>(**params)
+      - 'tradier'  -> calls Tradier market-data endpoints via operation mapping
+
+    Tradier operations supported:
+      - 'quotes'    params: {symbols: "SPY,AAPL", greeks: "false"|"true"}
+      - 'history'   params: {symbol: "SPY", interval: "1min|5min|15min|daily", start: "YYYY-MM-DD", end: "YYYY-MM-DD"}
+      - 'timesales' params: {symbol: "SPY", interval: "1min|5min", start: "YYYY-MM-DD HH:MM", end: "YYYY-MM-DD HH:MM"}
     """
+    provider = (provider or "massive").strip().lower()
     params = params or {}
+
+    # --- Tradier branch (underlying stocks/ETFs) ---
+    if provider == "tradier":
+        op = (operation or "").strip().lower()
+        if op == "quotes":
+            # GET /markets/quotes
+            # Required: symbols=CSV
+            return tradier_request("/markets/quotes", params)
+        if op == "history":
+            # GET /markets/history
+            # Required: symbol
+            return tradier_request("/markets/history", params)
+        if op == "timesales":
+            # GET /markets/timesales
+            # Required: symbol
+            return tradier_request("/markets/timesales", params)
+
+        return "Error: Unknown Tradier operation. Try: quotes, history, timesales."
+
+    # --- Massive branch (Options/Indices Advanced) ---
     try:
         fn = getattr(massive_client, operation, None)
         if fn is None:
             return (
-                f"Error: Unknown operation '{operation}'. "
-                "Tip: call 'massive_list_operations' to see available operation names."
+                f"Error: Unknown Massive operation '{operation}'. "
+                "Tip: call 'massive_list_operations' to see available Massive operation names."
             )
 
         # Normalize reserved keywords
@@ -75,12 +103,26 @@ def massive_query(operation: str, params: Optional[Dict[str, Any]] = None) -> st
 
         return str(result)
     except Exception as e:
+        return f"Error calling Massive operation '{operation}': {e}"
+
+
+        result = fn(**params)
+
+        # Most Massive client calls return an object with .data (bytes)
+        if hasattr(result, "data"):
+            raw = result.data
+            if isinstance(raw, (bytes, bytearray)):
+                return json_to_csv(raw.decode("utf-8"))
+            return json_to_csv(str(raw))
+
+        return str(result)
+    except Exception as e:
         return f"Error calling operation '{operation}': {e}"
 
 
 @poly_mcp.tool(
     name="massive_list_operations",
-    description="List Massive RESTClient operation names (filterable). Use this to find Options/Indices methods to call via massive_query.",
+    description="List Massive RESTClient operation names (filterable). Use this to find Options/Indices methods to call via massive_query with provider=massive.",
     annotations=ToolAnnotations(
         title="List Massive Operations",
         readOnlyHint=True,
@@ -2057,3 +2099,30 @@ async def get_futures_snapshot(
 def run(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
     """Run the Massive MCP server."""
     poly_mcp.run(transport)
+
+
+
+def tradier_request(path: str, query: dict | None = None) -> str:
+    """Call Tradier REST API and return raw JSON text.
+
+    Requires env vars:
+      - TRADIER_TOKEN: API token
+      - TRADIER_ENV: 'live' or 'sandbox' (default 'live')
+    """
+    env = (os.environ.get("TRADIER_ENV", "live") or "live").lower()
+    token = os.environ.get("TRADIER_TOKEN")
+    if not token:
+        return "Error: TRADIER_TOKEN not set."
+
+    base = "https://api.tradier.com/v1" if env == "live" else "https://sandbox.tradier.com/v1"
+    url = base.rstrip("/") + "/" + path.lstrip("/")
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            r = client.get(url, headers=headers, params=query or {})
+        return r.text
+    except Exception as e:
+        return f"Error calling Tradier: {e}"
+
