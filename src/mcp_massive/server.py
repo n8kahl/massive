@@ -35,6 +35,32 @@ except PackageNotFoundError:
 massive_client = RESTClient(MASSIVE_API_KEY)
 massive_client.headers["User-Agent"] += f" {version_number}"
 
+@poly_mcp.tool(
+    name="massive_query",
+    description="Router tool: call any Massive endpoint by name with params. Use this when tool limits restrict exposing many endpoints.",
+)
+def massive_query(operation: str, params: Dict[str, Any]) -> str:
+    try:
+        fn = getattr(massive_client, operation, None)
+        if fn is None:
+            return f"Error: Unknown operation '{operation}'"
+
+        # Handle Python reserved word for `from_` if user sends 'from'
+        if "from" in params and "from_" not in params:
+            params["from_"] = params.pop("from")
+
+        result = fn(**params)
+
+        # Most Massive client calls return response-like objects with .data
+        if hasattr(result, "data"):
+            data = result.data.decode("utf-8") if isinstance(result.data, (bytes, bytearray)) else str(result.data)
+            return json_to_csv(data) if isinstance(data, str) else str(data)
+
+        return str(result)
+
+    except Exception as e:
+        return f"Error: {e}"
+
 poly_mcp = FastMCP("Massive", host=HOST, port=PORT)
 @poly_mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_aggs(
