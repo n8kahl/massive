@@ -1981,6 +1981,24 @@ async def get_futures_snapshot(
 # It will be run from entrypoint.py
 
 
+
 def run(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
-    """Run the Massive MCP server."""
-    poly_mcp.run(transport)
+    """Run the Massive MCP server.
+
+    Hosted deployment notes (Railway/Fly/Render/etc):
+    - Bind to 0.0.0.0 and the injected PORT; binding to 127.0.0.1 will cause 502s.
+    - Streamable HTTP in FastMCP is started with transport="http" and typically serves at /mcp/.
+    """
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
+    path = os.environ.get("MCP_PATH", "/mcp/")
+
+    if transport == "stdio":
+        poly_mcp.run("stdio")
+        return
+
+    # FastMCP uses "http" for the Streamable HTTP transport.
+    eff_transport = "http" if transport == "streamable-http" else transport
+
+    poly_mcp.run(transport=eff_transport, host=host, port=port, path=path)
+
